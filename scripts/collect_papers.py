@@ -44,6 +44,8 @@ TRANSIENT_HTTP_CODES = {429, 500, 502, 503, 504}
 DBLP_TRANSIENT_HTTP_CODES = {429, 502, 503, 504}
 DEFAULT_SOURCE_TYPES = ["arxiv", "openalex", "crossref"]
 FEED_NAMESPACES = {"atom": "http://www.w3.org/2005/Atom"}
+PUBMED_SEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+PUBMED_FETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,26 @@ class ConferenceSource:
     group: str
     dblp_toc_patterns: list[str]
     years: list[int]
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
+class MedicalConferenceSource:
+    """Explicitly curated biomedical meeting feeds or PubMed meeting-name queries.
+
+    PubMed does not provide complete conference proceedings; records returned
+    by PubMed are labelled as indexed publications, not verified presentations.
+    """
+    id: str
+    name: str
+    group: str
+    type: str
+    years: list[int]
+    query: str = ""
+    url: str = ""
+    record_type: str = ""
+    required_terms: tuple[str, ...] = ()
+    relevance_keywords: tuple[str, ...] = ()
     enabled: bool = True
 
 
@@ -262,6 +284,44 @@ def parse_conference_sources(config: dict[str, Any], now: dt.datetime) -> list[C
         if source.enabled and source.dblp_toc_patterns:
             sources.append(source)
     return sources
+
+
+def parse_medical_conference_sources(config: dict[str, Any], now: dt.datetime) -> list[MedicalConferenceSource]:
+    section = config.get("conference_sources") or {}
+    if not isinstance(section, dict) or not section.get("enabled", False):
+        return []
+    default_years = default_conference_years(section, now)
+    parsed: list[MedicalConferenceSource] = []
+    for item in section.get("medical_venues", []):
+        if not isinstance(item, dict) or not item.get("enabled", True):
+            continue
+        source_type = str(item.get("type") or "").strip().lower()
+        if source_type not in {"pubmed", "feed", "rss", "atom"}:
+            print(f"Warning: unsupported medical venue type: {source_type}", file=sys.stderr)
+            continue
+        query = str(item.get("query") or "").strip()
+        url = str(item.get("url") or "").strip()
+        if source_type == "pubmed" and not query:
+            print(f"Warning: medical PubMed venue needs a query: {item.get('name')}", file=sys.stderr)
+            continue
+        if source_type in {"feed", "rss", "atom"} and not url:
+            print(f"Warning: medical feed venue needs an RSS/Atom url: {item.get('name')}", file=sys.stderr)
+            continue
+        record_type = str(item.get("record_type") or
+                          ("indexed_publication" if source_type == "pubmed" else "meeting_news"))
+        parsed.append(MedicalConferenceSource(
+            id=str(item.get("id") or slugify(str(item.get("name") or "medical-meeting"))),
+            name=str(item.get("name") or item.get("id") or "Medical meeting"),
+            group=str(item.get("group") or "cardiology"),
+            type=source_type,
+            years=parse_years(item.get("years")) or default_years,
+            query=query,
+            url=url,
+            record_type=record_type,
+            required_terms=tuple(str(x).lower() for x in item.get("required_terms", []) if str(x).strip()),
+            relevance_keywords=tuple(str(x).lower() for x in item.get("relevance_keywords", []) if str(x).strip()),
+        ))
+    return parsed
 
 
 def github_request(url: str, token: str) -> Any:
@@ -1319,6 +1379,140 @@ def fetch_feed(source: SourceConfig, max_results: int) -> list[dict[str, Any]]:
     return [paper for paper in papers if paper.get("title")]
 
 
+def pubmed_article_text(element: ET.Element | None) -> str:
+    if element is None:
+        return ""
+    return normalize_space(" ".join(element.itertext()))
+
+
+def parse_pubmed_articles(xml_data: bytes) -> list[dict[str, Any]]:
+    root = ET.fromstring(xml_data)
+    papers: list[dict[str, Any]] = []
+    for entry in root.findall(".//PubmedArticle"):
+        citation = entry.find("MedlineCitation")
+        if citation is None:
+            continue
+        article = citation.find("Article")
+        if article is None:
+            continue
+        pmid = normalize_space(citation.findtext("PMID", default=""))
+        title = pubmed_article_text(article.find("ArticleTitle"))
+        if not pmid or not title:
+            continue
+        parts = []
+        for p in article.findall(".//Abstract/AbstractText"):
+            label = p.get("Label") or ""
+            value = pubmed_article_text(p)
+            if value:
+                parts.append(f"{label}: {value}" if label else value)
+        authors = []
+        for author in article.findall(".//AuthorList/Author")[:12]:
+            collective = author.findtext("CollectiveName", default="")
+            name = collective or " ".join(filter(None, [author.findtext("ForeName"), author.findtext("LastName")]))
+            if name.strip():
+                authors.append(normalize_space(name))
+        pubdate = article.find("ArticleDate")
+        if pubdate is None:
+            pubdate = article.find(".//Journal/JournalIssue/PubDate")
+        year = pubdate.findtext("Year", default="") if pubdate is not None else ""
+        month = pubdate.findtext("Month", default="01") if pubdate is not None else "01"
+        day = pubdate.findtext("Day", default="01") if pubdate is not None else "01"
+        month_map = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+                     "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
+        if not month.isdigit():
+            month = str(month_map.get(month[:3].lower(), 1))
+        if not year:
+            medline_date = pubdate.findtext("MedlineDate", default="") if pubdate is not None else ""
+            match = re.search(r"\b(?:19|20)\d{2}\b", medline_date)
+            year = match.group(0) if match else ""
+        published = ""
+        if year:
+            try:
+                published = dt.datetime(int(year), int(month), int(day), tzinfo=dt.timezone.utc).isoformat()
+            except ValueError:
+                published = f"{int(year):04d}-01-01T00:00:00+00:00"
+        doi = next((normalize_space(x.text or "") for x in entry.findall(".//ArticleIdList/ArticleId")
+                    if x.attrib.get("IdType") == "doi"), "")
+        journal = article.findtext(".//Journal/Title", default="")
+        papers.append({
+            "id": f"pubmed:{pmid}", "source": "PubMed", "title": title,
+            "authors": authors, "summary": normalize_space(" ".join(parts)),
+            "published": published, "updated": "",
+            "paper_url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/", "pdf_url": "",
+            "categories": [journal] if journal else [], "pmid": pmid, "doi": doi,
+        })
+    return papers
+
+
+def fetch_pubmed_meeting(source: MedicalConferenceSource, max_results: int) -> list[dict[str, Any]]:
+    """Use NCBI E-utilities; a meeting-name search is NOT a proceedings index."""
+    params = {"db": "pubmed", "term": source.query,
+              "retmode": "json", "retmax": str(min(max(1, max_results), 200)),
+              "sort": "pub date", "datetype": "pdat",
+              "mindate": f"{min(source.years)}/01/01",
+              "maxdate": dt.datetime.now(dt.timezone.utc).strftime("%Y/%m/%d")}
+    email = os.getenv("CONTACT_EMAIL") or os.getenv("NCBI_EMAIL")
+    if email:
+        params["email"] = email
+    api_key = os.getenv("NCBI_API_KEY")
+    if api_key:
+        params["api_key"] = api_key
+    results = request_json(f"{PUBMED_SEARCH_URL}?{urllib.parse.urlencode(params)}",
+                           timeout=float(os.getenv("PUBMED_TIMEOUT_SECONDS", "60")))
+    pmids = (results.get("esearchresult") or {}).get("idlist") or []
+    if not pmids:
+        return []
+    # NCBI permits modest unauthenticated use. Separate ESearch and EFetch.
+    time.sleep(0.45)
+    fetch_params = {"db": "pubmed", "id": ",".join(str(i) for i in pmids),
+                    "rettype": "xml", "retmode": "xml"}
+    if api_key:
+        fetch_params["api_key"] = api_key
+    xml_data = request_bytes(f"{PUBMED_FETCH_URL}?{urllib.parse.urlencode(fetch_params)}",
+                             timeout=float(os.getenv("PUBMED_TIMEOUT_SECONDS", "60")))
+    return parse_pubmed_articles(xml_data)
+
+
+def fetch_medical_conference(source: MedicalConferenceSource, max_results: int) -> list[dict[str, Any]]:
+    if source.type == "pubmed":
+        records = fetch_pubmed_meeting(source, max_results)
+    else:
+        records = fetch_feed(SourceConfig(type="feed", name=source.name, url=source.url), max_results)
+
+    accepted: list[dict[str, Any]] = []
+    for record in records:
+        title = normalize_space(str(record.get("title") or ""))
+        summary = normalize_space(str(record.get("summary") or ""))
+        text = f"{title} {summary}".lower()
+        if source.required_terms and not any(term in text for term in source.required_terms):
+            continue
+        hits = [term for term in source.relevance_keywords if term in text]
+        if source.relevance_keywords and not hits:
+            continue
+        parsed_date = paper_datetime(record)
+        year = parsed_date.year if parsed_date.year > 1900 else max(source.years)
+        if year not in source.years:
+            continue
+        paper = dict(record)
+        paper["source"] = f"{source.name} · {'PubMed' if source.type == 'pubmed' else 'RSS'}"
+        paper["source_type"] = "conference"
+        paper["record_type"] = source.record_type  # News ≠ abstract ≠ peer-reviewed paper
+        paper["conference_relevance_hits"] = hits
+        paper["skip_abstract_enrichment"] = True
+        paper["venue"] = source.name
+        paper["categories"] = list(dict.fromkeys([
+            source.name, source.group, str(year), source.record_type,
+            *paper.get("categories", [])
+        ]))
+        paper["conference"] = {
+            "id": source.id, "name": source.name, "group": source.group,
+            "year": year, "doi": paper.get("doi", ""),
+            "record_type": source.record_type,
+        }
+        accepted.append(paper)
+    return accepted
+
+
 def fetch_source_topic(source: SourceConfig, topic: Topic, max_results: int) -> list[dict[str, Any]]:
     if source.type == "arxiv":
         return fetch_arxiv(topic, max_results)
@@ -1480,6 +1674,8 @@ def is_relevant_enough(paper: dict[str, Any], best_match: dict[str, Any]) -> boo
 
     score = float(best_match.get("score") or 0.0)
     if paper.get("source_type") == "conference":
+        if paper.get("conference_relevance_hits"):
+            return True
         return score >= env_float("MIN_CONFERENCE_SCORE", 0.18)
     if not has_meaningful_summary(paper):
         return score >= env_float("MIN_TITLE_ONLY_SCORE", 0.18)
@@ -1513,7 +1709,7 @@ def enrich_conference_papers_from_arxiv(papers: list[dict[str, Any]]) -> dict[st
 
     attempts = 0
     for paper in papers:
-        if paper.get("source_type") != "conference" or has_meaningful_summary(paper):
+        if paper.get("source_type") != "conference" or paper.get("skip_abstract_enrichment") or has_meaningful_summary(paper):
             continue
         if attempts >= max_enrichments:
             stats["conference_abstract_enrichment_skipped"] += 1
@@ -1554,8 +1750,26 @@ def fallback_summary(paper: dict[str, Any], best_match: dict[str, Any]) -> dict[
     abstract = paper.get("summary", "")
     first_sentence = re.split(r"(?<=[.!?])\s+", abstract)[0] if abstract else ""
     if paper.get("source_type") == "conference" and not has_meaningful_summary(paper):
+        if paper.get("record_type") == "meeting_news":
+            return {
+                "problem": "这是会议动态或新闻报道，不等于经同行评审的原创论文。",
+                "method": "请通过原文链接核对试验设计和正式发表情况。",
+                "innovation": "报道内容不足以独立证实创新点。",
+                "evidence": "来源为公开会议报道；如有 DOI/PMID 应进一步核对。",
+                "limitations": "会议报道可能不含完整结果，且不代表完整会议摘要目录。",
+                "why_relevant": best_match.get("reason", "匹配会议研究范围。"),
+            }
+        if paper.get("record_type") == "indexed_publication":
+            return {
+                "problem": "PubMed 已索引该会议相关文献，但当前摘要内容不足。",
+                "method": "请点击 PMID 原文链接核对研究设计和会议关联。",
+                "innovation": "摘要不足，无法可靠提炼创新点。",
+                "evidence": "该条目是 PubMed 期刊文献记录，不代表已验证的会议报告或完整会议摘要。",
+                "limitations": "仅能覆盖标题包含会议名称的部分已索引成果。",
+                "why_relevant": best_match.get("reason", "匹配会议研究范围。"),
+            }
         return {
-            "problem": "DBLP 题录没有摘要，且未在外部论文索引中找到足够可靠的同题论文摘要。",
+            "problem": "当前会议记录没有足够的摘要，尚不能进行可靠的论文内容分析。",
             "method": "请打开论文链接查看方法和系统设计细节。",
             "innovation": "仅凭标题无法可靠判断创新点，已避免占用模型翻译额度。",
             "evidence": "题录信息来自会议索引，技术细节需要在原文中核验。",
@@ -1931,7 +2145,9 @@ def collect(
     sources = parse_sources(config)
     now = dt.datetime.now(dt.timezone.utc)
     conference_sources = parse_conference_sources(config, now)
+    medical_conference_sources = parse_medical_conference_sources(config, now)
     active_conference_years_by_source = active_conference_years(conference_sources)
+    active_conference_years_by_source.update({s.id: set(s.years) for s in medical_conference_sources})
     mixed_existing_payload = {} if clear_cache else load_existing_payload(output_path)
     existing_payload, migrated_conference_payload = split_conference_payload(mixed_existing_payload)
     stored_conference_payload = {} if clear_cache else load_existing_payload(conference_output_path)
@@ -2040,6 +2256,30 @@ def collect(
             source_stats[source.name]["failed_fetches"] += 1
             source_stats[source.name]["last_error"] = str(exc)
             print(f"Warning: DBLP request failed for {source.name}: {exc}", file=sys.stderr)
+
+    # Unlike DBLP proceedings, medical meeting feeds/queries are refreshed each run.
+    for index, source in enumerate(medical_conference_sources):
+        if index:
+            time.sleep(float(os.getenv("MEDICAL_CONFERENCE_DELAY_SECONDS", "1")))
+        source_stats[source.name] = {
+            "type": f"medical_conference_{source.type}",
+            "successful_fetches": 0, "failed_fetches": 0,
+        }
+        print(f"Fetching medical meeting: {source.name} ({source.type})", flush=True)
+        try:
+            source_papers = fetch_medical_conference(source, max(1, min(max_per_conference, 100)))
+            all_candidates.extend(source_papers)
+            successful_fetches += 1
+            successful_conference_fetches += 1
+            source_stats[source.name]["successful_fetches"] += 1
+            source_stats[source.name]["paper_count"] = len(source_papers)
+            print(f"Medical meeting {source.name}: {len(source_papers)} relevant record(s)", flush=True)
+        except Exception as exc:
+            failed_fetches += 1
+            failed_conference_fetches += 1
+            source_stats[source.name]["failed_fetches"] += 1
+            source_stats[source.name]["last_error"] = str(exc)
+            print(f"Warning: medical meeting request failed for {source.name}: {exc}", file=sys.stderr)
 
     for cached_paper in existing_conference_payload.get("papers", []) if isinstance(existing_conference_payload, dict) else []:
         if not isinstance(cached_paper, dict) or cached_paper.get("source_type") != "conference":
@@ -2198,6 +2438,7 @@ def collect(
         "max_new_conference_papers": max_new_conference_papers,
         "sources": [source.__dict__ for source in sources],
         "conference_sources": [source.__dict__ for source in conference_sources],
+        "medical_conference_sources": [source.__dict__ for source in medical_conference_sources],
         "source_stats": source_stats,
         "llm_enabled": llm_enabled(),
         "llm_concurrency": int(os.getenv("LLM_CONCURRENCY", "2")),
@@ -2207,7 +2448,8 @@ def collect(
         "successful_conference_fetches": successful_conference_fetches,
         "failed_conference_fetches": failed_conference_fetches,
         "skipped_cached_conference_years": skipped_cached_conference_years,
-        "conference_source_count": len(conference_sources),
+        "conference_source_count": len(conference_sources) + len(medical_conference_sources),
+        "medical_conference_source_count": len(medical_conference_sources),
         "cached_conference_candidate_count": cached_conference_candidate_count,
         "clear_cache": clear_cache,
         **conference_enrichment_stats,
