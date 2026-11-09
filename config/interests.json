@@ -1,128 +1,216 @@
 {
   "sources": [
-    { "type": "arxiv", "name": "arXiv" }
+    {
+      "type": "arxiv",
+      "name": "arXiv"
+    },
+    {
+      "type": "openalex",
+      "name": "OpenAlex"
+    },
+    {
+      "type": "crossref",
+      "name": "Crossref"
+    },
+    {
+      "type": "feed",
+      "name": "PubMed - Retinal OCTA and CAD",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/rss/search/1PkbMHWMHFniH-TUckeJ9Aey851TtJ2vYSVnKZlzDFtvojrkX7/?limit=50&utm_campaign=pubmed-2&fc=20261109044927"
+    },
+    {
+      "type": "feed",
+      "name": "PubMed - Coronary Plaque",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/rss/search/1XkGOs2RTTP6VNA8R4qyDjWJugBGPG8zN1aeyPVABypsm4O5U7/?limit=50&utm_campaign=pubmed-2&fc=20261109045303"
+    },
+    {
+      "type": "feed",
+      "name": "PubMed - Cardiovascular Outcomes",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/rss/search/1RKSf0HH9l2v1CKSCSJdEeWB0_wkRKRW9fn5Cxg16AOq31m1Lk/?limit=50&utm_campaign=pubmed-2&fc=20261109045357"
+    }
   ],
   "conference_sources": {
     "enabled": true,
-    "current_year": 2026,
-    "lookback_years": 2,
-    "venues": [
+    "include_default_venues": false,
+    "venues": [],
+    "medical_venues": [
       {
-        "id": "isca",
-        "name": "ISCA",
-        "group": "computer architecture",
-        "dblp_toc_patterns": ["db/conf/isca/isca{year}.bht"]
-      },
-      {
-        "id": "micro",
-        "name": "MICRO",
-        "group": "computer architecture",
-        "dblp_toc_patterns": ["db/conf/micro/micro{year}.bht"]
-      },
-      {
-        "id": "hpca",
-        "name": "HPCA",
-        "group": "computer architecture",
-        "dblp_toc_patterns": ["db/conf/hpca/hpca{year}.bht"]
-      },
-      {
-        "id": "asplos",
-        "name": "ASPLOS",
-        "group": "computer architecture",
-        "dblp_toc_patterns": [
-          "db/conf/asplos/asplos{year}-1.bht",
-          "db/conf/asplos/asplos{year}-2.bht",
-          "db/conf/asplos/asplos{year}-3.bht",
-          "db/conf/asplos/asplos{year}-4.bht"
+        "id": "tct",
+        "name": "TCT",
+        "type": "pubmed",
+        "group": "interventional cardiology",
+        "years": [
+          2026,
+          2025
+        ],
+        "query": "((\"Transcatheter Cardiovascular Therapeutics\"[Title] OR \"TCT 2026\"[Title] OR \"TCT 2025\"[Title]) AND (coronary[Title/Abstract] OR PCI[Title/Abstract] OR stent[Title/Abstract] OR intravascular[Title/Abstract] OR plaque[Title/Abstract]))",
+        "record_type": "indexed_publication",
+        "relevance_keywords": [
+          "coronary",
+          "pci",
+          "stent",
+          "intravascular",
+          "oct",
+          "plaque",
+          "atherosclerosis",
+          "antithrombotic",
+          "dapt",
+          "myocardial infarction",
+          "acute coronary syndrome",
+          "clinical trial",
+          "randomized",
+          "ischemia",
+          "ivus",
+          "qfr"
         ]
       },
       {
-        "id": "mlsys",
-        "name": "MLSys",
-        "group": "systems for machine learning",
-        "dblp_toc_patterns": ["db/conf/mlsys/mlsys{year}.bht"]
+        "id": "aha",
+        "name": "AHA Scientific Sessions",
+        "type": "pubmed",
+        "group": "cardiovascular clinical research",
+        "years": [
+          2026,
+          2025
+        ],
+        "query": "((\"American Heart Association Scientific Sessions\"[Title] OR \"AHA Scientific Sessions\"[Title]) AND (coronary[Title/Abstract] OR cardiovascular[Title/Abstract] OR atherosclerosis[Title/Abstract] OR myocardial infarction[Title/Abstract]))",
+        "record_type": "indexed_publication",
+        "relevance_keywords": [
+          "coronary",
+          "pci",
+          "stent",
+          "intravascular",
+          "oct",
+          "plaque",
+          "atherosclerosis",
+          "antithrombotic",
+          "dapt",
+          "myocardial infarction",
+          "acute coronary syndrome",
+          "clinical trial",
+          "randomized",
+          "ischemia",
+          "ivus",
+          "qfr"
+        ]
       },
       {
-        "id": "eurosys",
-        "name": "EuroSys",
-        "group": "systems",
-        "dblp_toc_patterns": ["db/conf/eurosys/eurosys{year}.bht"]
+        "id": "aha-news",
+        "name": "AHA Meeting News",
+        "type": "feed",
+        "group": "cardiovascular clinical research",
+        "years": [
+          2026,
+          2025
+        ],
+        "url": "https://newsroom.heart.org/cats/scientific_conferences_meetings.xml",
+        "record_type": "meeting_news",
+        "required_terms": [
+          "Scientific Sessions"
+        ],
+        "relevance_keywords": [
+          "coronary",
+          "pci",
+          "stent",
+          "intravascular",
+          "oct",
+          "plaque",
+          "atherosclerosis",
+          "antithrombotic",
+          "dapt",
+          "myocardial infarction",
+          "acute coronary syndrome",
+          "clinical trial",
+          "randomized",
+          "ischemia",
+          "ivus",
+          "qfr"
+        ]
+      },
+      {
+        "id": "esc",
+        "name": "ESC Congress",
+        "type": "pubmed",
+        "group": "cardiovascular clinical research",
+        "years": [
+          2026,
+          2025
+        ],
+        "query": "((\"ESC Congress\"[Title] OR \"European Society of Cardiology Congress\"[Title]) AND (coronary[Title/Abstract] OR cardiovascular[Title/Abstract] OR atherosclerosis[Title/Abstract] OR myocardial infarction[Title/Abstract]))",
+        "record_type": "indexed_publication",
+        "relevance_keywords": [
+          "coronary",
+          "pci",
+          "stent",
+          "intravascular",
+          "oct",
+          "plaque",
+          "atherosclerosis",
+          "antithrombotic",
+          "dapt",
+          "myocardial infarction",
+          "acute coronary syndrome",
+          "clinical trial",
+          "randomized",
+          "ischemia",
+          "ivus",
+          "qfr"
+        ]
       }
     ]
   },
   "topics": [
     {
-      "id": "llm_low_precision_quantization",
-      "name": "大模型低精度量化",
-      "description": "关注大语言模型低比特量化、混合精度、量化感知训练、后训练量化、权重量化、激活量化、KV cache 量化以及量化对推理性能和精度的影响。",
+      "id": "ocular_octa_cad",
+      "name": "眼OCT/OCTA与冠心病",
+      "description": "重点关注视网膜OCT/OCTA结构及微血管指标与冠心病发生、冠脉狭窄程度、Gensini评分及冠状动脉粥样硬化负担之间的关系。",
       "keywords": [
-        "large language model quantization",
-        "LLM quantization",
-        "low-bit quantization",
-        "post-training quantization",
-        "weight-only quantization",
-        "activation quantization",
-        "mixed precision",
-        "FP8",
-        "INT4",
-        "INT8",
-        "KV cache quantization"
+        "retinal OCTA coronary artery disease",
+        "retinal microvascular coronary heart disease",
+        "retinal vessel density coronary stenosis",
+        "retinal OCT coronary atherosclerosis",
+        "retinal nerve fiber layer coronary disease",
+        "foveal avascular zone coronary"
       ],
-      "arxiv_categories": ["cs.CL", "cs.LG", "cs.AI", "cs.DC"]
+      "arxiv_categories": [
+        "physics.med-ph",
+        "q-bio.QM"
+      ]
     },
     {
-      "id": "tensor_compute_unit_architecture",
-      "name": "张量计算单元结构",
-      "description": "关注 GPU/NPU/TPU 张量计算单元、矩阵乘加阵列、数据流架构、片上存储层次、低精度张量核、AI 加速器微架构和算子映射。",
+      "id": "retinal_plaque_vulnerability",
+      "name": "视网膜微循环与冠脉斑块易损性",
+      "description": "重点关注眼OCTA微循环与冠脉OCT/IVUS斑块形态、斑块破裂、斑块侵蚀、TCFA及多血管床动脉粥样硬化之间的联系。",
       "keywords": [
-        "tensor processing unit",
-        "tensor core",
-        "matrix multiply unit",
-        "systolic array",
-        "AI accelerator architecture",
-        "NPU architecture",
-        "GPU tensor core",
-        "low precision tensor compute",
-        "dataflow architecture",
-        "on-chip memory hierarchy"
+        "retinal OCTA coronary plaque",
+        "retinal microcirculation plaque vulnerability",
+        "retinal microvascular plaque rupture",
+        "retinal imaging coronary atherosclerosis",
+        "retinal OCTA intracoronary OCT",
+        "retinal OCTA polyvascular disease"
       ],
-      "arxiv_categories": ["cs.AR", "cs.DC", "cs.LG", "cs.PF"]
+      "arxiv_categories": [
+        "physics.med-ph",
+        "q-bio.QM"
+      ]
     },
     {
-      "id": "llm_inference_cluster_communication",
-      "name": "大模型推理集群通信优化",
-      "description": "关注分布式大模型推理、prefill/decode 分离、张量并行、流水并行、专家并行、跨节点通信、调度、负载均衡和 serving 系统吞吐延迟优化。",
+      "id": "retinal_cardiovascular_prediction",
+      "name": "眼OCTA与心血管风险预测",
+      "description": "关注眼OCT/OCTA与冠心病风险分层、心肌梗死、急性冠脉综合征、MACE、长期预后及多模态人工智能预测模型。",
       "keywords": [
-        "LLM inference serving",
-        "distributed inference",
-        "inference cluster",
-        "tensor parallelism",
-        "pipeline parallelism",
-        "expert parallelism",
-        "all-reduce",
-        "collective communication",
-        "prefill decode disaggregation",
-        "serving scheduler"
+        "retinal OCTA cardiovascular risk",
+        "retinal imaging cardiovascular prediction",
+        "retinal microvascular cardiovascular events",
+        "retinal OCT myocardial infarction",
+        "retinal OCTA acute coronary syndrome",
+        "retinal imaging machine learning coronary",
+        "retinal OCTA major adverse cardiovascular events"
       ],
-      "arxiv_categories": ["cs.DC", "cs.PF", "cs.CL", "cs.LG"]
-    },
-    {
-      "id": "kvcache_compression_storage_scheduling",
-      "name": "KV cache 压缩与存储调度",
-      "description": "关注大模型推理中的 KV cache 压缩、淘汰、分页、卸载、预取、层级存储、显存管理和长上下文推理效率优化。",
-      "keywords": [
-        "KV cache compression",
-        "KV cache eviction",
-        "KV cache scheduling",
-        "paged attention",
-        "attention cache",
-        "long context inference",
-        "memory offloading",
-        "GPU memory management",
-        "cache prefetching",
-        "LLM serving memory"
-      ],
-      "arxiv_categories": ["cs.CL", "cs.LG", "cs.DC", "cs.PF"]
+      "arxiv_categories": [
+        "physics.med-ph",
+        "cs.CV",
+        "cs.LG"
+      ]
     }
   ]
 }
