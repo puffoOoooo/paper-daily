@@ -1490,7 +1490,11 @@ def fetch_medical_conference(source: MedicalConferenceSource, max_results: int) 
         if source.relevance_keywords and not hits:
             continue
         parsed_date = paper_datetime(record)
-        year = parsed_date.year if parsed_date.year > 1900 else max(source.years)
+        publication_year = parsed_date.year if parsed_date.year > 1900 else max(source.years)
+        # A publication reviewing the 2024 Scientific Sessions may be published
+        # in 2025. Distinguish the actual meeting year from publication year.
+        title_years = re.findall(r"(?<!\d)20(?:2\d|3\d)(?!\d)", title)
+        year = int(title_years[-1]) if title_years else publication_year
         if year not in source.years:
             continue
         paper = dict(record)
@@ -1668,15 +1672,96 @@ def has_meaningful_summary(paper: dict[str, Any], min_chars: int = 80) -> bool:
     return len(summary) >= min_chars
 
 
+def cardio_ocular_scope(paper: dict[str, Any]) -> str:
+    """Balanced evidence tiers for retinal-CAD research, not a clinical classifier.
+
+    Keep directly related publications, plausible adjacent imaging/physiology
+    studies and a limited number of coronary-trial methods/clinical-context
+    papers. A meeting brand on its own is never sufficient.
+    """
+    title = normalize_space(str(paper.get("title") or "")).lower()
+    summary = normalize_space(str(paper.get("summary") or "")).lower()
+    text = f"{title} {summary}"
+
+    def has(pattern: str) -> bool:
+        return bool(re.search(pattern, text, flags=re.I))
+
+    retinal = has(r"\b(?:retina\w*|fundus|ocular|ophthalm\w*|macula\w*|foveal|"
+                  r"rnfl|gcipl|choroid\w*|retinopath\w*|octa)\b|"
+                  r"optical coherence tomography angiography")
+    cardiac = has(r"\b(?:coronary|cardiovascular|myocard\w*|cardiac|"
+                 r"ischemic heart disease|ischaemic heart disease|heart disease|"
+                 r"atheroscleros\w*|mace|acute coronary syndrome|pci|stemi|nstemi)\b")
+    coronary = has(r"\b(?:coronary|pci|percutaneous coronary intervention|"
+                  r"acute coronary syndrome|stemi|nstemi|"
+                  r"myocardial infarction|coronary artery disease|"
+                  r"myocardial isch\w*|revasculariz\w*|revascularis\w*)\b")
+    plaque = has(r"\b(?:plaque|vulnerab\w*|fibroatheroma|tcfa|"
+                 r"rupture|erosion|atheroscleros\w*)\b")
+    coronary_methods = has(r"\b(?:intravascular|ivus|optical coherence tomography|"
+                          r"coronary imaging|angiography|angiograph\w*|"
+                          r"qfr|ffr|microvascular|microcirculat\w*|"
+                          r"stenosis|revasculariz\w*|revascularis\w*)\b")
+    coronary_therapy = has(r"\b(?:stent\w*|antiplatelet|dapt|antithrombotic|"
+                           r"thrombos\w*|intervention|randomiz\w*|randomis\w*|"
+                           r"clinical trial|trial\b|acs|pci)\b")
+    outcomes = has(r"\b(?:risk prediction|prognos\w*|mortality|mace|"
+                   r"cardiovascular event\w*|cardiovascular outcome\w*|"
+                   r"myocardial infarction|major adverse cardiovascular)\b")
+    vascular_analogy = has(r"\b(?:vascular|microvasc\w*|"
+                           r"carotid|peripheral artery|stroke|systemic|"
+                           r"endothelial dysfunction)\b")
+
+    # Meeting highlights/reviews are supporting reading, not original
+    # late-breaking trials; avoid filling the meeting shortlist with them.
+    overview = bool(re.search(
+        r"\b(?:highlights of|meeting highlights|congress highlights|"
+        r"a narrative review|a focused review|a review of studies presented)\b",
+        title, flags=re.I))
+
+    if retinal and coronary:
+        return "core"
+    if retinal and cardiac:
+        return "related"
+    if coronary and (plaque or coronary_methods):
+        return "related"
+    if coronary and (coronary_therapy or outcomes):
+        return "exploratory" if overview else "related"
+    # Retinal analogies useful for mechanism and methodological transfer, but
+    # never let general ophthalmology or diabetes alone dominate the digest.
+    if retinal and vascular_analogy and not paper.get("source_type") == "conference":
+        return "exploratory"
+    return "exclude"
+
+
 def is_relevant_enough(paper: dict[str, Any], best_match: dict[str, Any]) -> bool:
-    if best_match.get("keyword_hits"):
+    if env_flag("CARDIO_OCULAR_BALANCED_FILTER", True):
+        tier = cardio_ocular_scope(paper)
+        paper["relevance_tier"] = tier
+        if tier == "exclude":
+            return False
+        if paper.get("source_type") == "conference":
+            # Conference stream must contain coronary/ACS/PCI work, not generic
+            # clinical news.  Tier may be core, related or exploratory.
+            title = str(paper.get("title") or "")
+            summary = str(paper.get("summary") or "")
+            is_coronary = bool(re.search(
+                r"\b(?:coronary|pci|acute coronary syndrome|stemi|nstemi|"
+                r"myocardial infarction|revasculariz\w*|revascularis\w*)\b",
+                title + " " + summary, flags=re.I))
+            is_overview = bool(re.search(
+                r"\b(?:highlights of|meeting highlights|congress highlights|"
+                r"a narrative review|a focused review)\b", title, flags=re.I))
+            if not is_coronary or is_overview:
+                return False
         return True
 
+    # Original generic matching available if the balanced gate is disabled.
+    if best_match.get("keyword_hits"):
+        return True
     score = float(best_match.get("score") or 0.0)
     if paper.get("source_type") == "conference":
-        if paper.get("conference_relevance_hits"):
-            return True
-        return score >= env_float("MIN_CONFERENCE_SCORE", 0.18)
+        return bool(paper.get("conference_relevance_hits")) or score >= env_float("MIN_CONFERENCE_SCORE", 0.18)
     if not has_meaningful_summary(paper):
         return score >= env_float("MIN_TITLE_ONLY_SCORE", 0.18)
     return score >= env_float("MIN_PAPER_SCORE", 0.08)
